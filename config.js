@@ -12,5 +12,5 @@
 // public sign-ups are disabled (see README Part 3). If someone finds this
 // key with no valid login, they can do nothing with it.
 
-window.SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
-window.SUPABASE_ANON_KEY = "YOUR-ANON-PUBLIC-KEY";
+window.SUPABASE_URL = "https://vffsrpohqfmhwzzhfkgf.supabase.co";
+window.SUPABASE_ANON_KEY = "sb_publishable_A_hFz5_E97MDy-0i4X5etg_HFuyzDa8";

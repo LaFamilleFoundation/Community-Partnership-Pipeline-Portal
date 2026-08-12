@@ -1,0 +1,9 @@
+{
+  "name": "lff-partnership-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "description": "La Famille Foundation community partnership pipeline — Supabase-backed portal",
+  "scripts": {
+    "dev": "npx --yes serve . -l 5173"
+  }
+}

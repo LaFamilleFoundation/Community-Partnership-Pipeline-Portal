@@ -97,6 +97,15 @@
   .statuspill.expired{background:var(--red-tint);color:var(--red);}
   .statuspill.missing{background:var(--amber-tint);color:var(--amber);}
 
+  .docactions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;}
+  .btn-link{background:none;border:none;color:var(--teal);font-size:12px;font-weight:700;padding:0;cursor:pointer;text-decoration:underline;white-space:nowrap;}
+  .btn-link:hover{color:var(--forest);}
+  .upload-label input[type=file]{display:none;}
+  .adddoc{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);}
+  .adddoc input[type=text]{flex:1;min-width:160px;padding:7px 10px;border:1.5px solid var(--line);border-radius:7px;font-size:13px;font-family:inherit;}
+  .adddoc select{padding:7px 9px;border:1.5px solid var(--line);border-radius:7px;font-size:13px;font-family:inherit;}
+  .adddoc input[type=file]{font-size:12px;max-width:180px;}
+
   .flaglist{display:flex;flex-direction:column;gap:6px;}
   .flagrow{display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--red-tint);color:#7a3120;border-radius:8px;padding:8px 11px;font-size:13.5px;}
   .flagrow button{background:none;border:none;color:#7a3120;font-weight:700;font-size:13px;}

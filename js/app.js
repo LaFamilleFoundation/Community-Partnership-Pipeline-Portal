@@ -17,7 +17,7 @@ let state = {
   user: null,
   communities: [],
   view: 'board', activeId: null, formMode: null,
-  search: '', menuOpen: false,
+  search: '', docSearch: '', menuOpen: false,
   loaded: false, loadError: null,
 };
 
@@ -78,7 +78,7 @@ async function loadAll(){
 
   const byId = {};
   (comm||[]).forEach(r => byId[r.id] = rowToCommunity(r));
-  (docs||[]).forEach(r => { if(byId[r.community_id]) byId[r.community_id].documents.push({id:r.id, name:r.name, status:r.status, note:r.note||''}); });
+  (docs||[]).forEach(r => { if(byId[r.community_id]) byId[r.community_id].documents.push({id:r.id, name:r.name, status:r.status, note:r.note||'', filePath:r.file_path||''}); });
   (flagRows||[]).forEach(r => { if(byId[r.community_id]) byId[r.community_id].flags.push({id:r.id, text:r.flag_text}); });
   (commsRows||[]).forEach(r => { if(byId[r.community_id]) byId[r.community_id].comms.push({id:r.id, date:r.comm_date, channel:r.channel, by:r.logged_by||'', summary:r.summary}); });
   Object.values(byId).forEach(c => c.comms.sort((a,b)=> (b.date||'').localeCompare(a.date||'')));
@@ -125,6 +125,8 @@ window.openNewForm = function(){ state.view='form'; state.formMode='new'; state.
 window.openEditForm = function(id){ state.view='form'; state.formMode='edit'; state.activeId=id; render(); window.scrollTo(0,0); };
 window.toggleMenu = function(){ state.menuOpen = !state.menuOpen; render(); };
 window.setSearch = function(v){ state.search = v; render(); };
+window.openDocuments = function(){ state.view='documents'; state.menuOpen=false; render(); window.scrollTo(0,0); };
+window.setDocSearch = function(v){ state.docSearch = v; render(); };
 
 window.changeStage = async function(id, newStage){
   await withBusy(async ()=>{
@@ -147,6 +149,51 @@ window.cycleDocStatus = async function(id, docId){
     const { error } = await window.sb.from('documents').update({status:next}).eq('id', docId);
     if(error) throw error;
     await refresh();
+  });
+};
+
+function safeFileName(name){ return name.replace(/[^a-zA-Z0-9_.-]/g, '_'); }
+
+window.viewDocumentFile = async function(filePath){
+  if(!filePath) return;
+  const { data, error } = await window.sb.storage.from('documents').createSignedUrl(filePath, 60);
+  if(error){ toast('Could not open file — ' + error.message); return; }
+  window.open(data.signedUrl, '_blank');
+};
+
+window.uploadDocumentFile = async function(id, docId, inputEl){
+  const file = inputEl.files[0];
+  if(!file) return;
+  await withBusy(async ()=>{
+    const path = `${id}/${docId}-${Date.now()}-${safeFileName(file.name)}`;
+    const { error: upErr } = await window.sb.storage.from('documents').upload(path, file);
+    if(upErr) throw upErr;
+    const { error } = await window.sb.from('documents').update({file_path: path}).eq('id', docId);
+    if(error) throw error;
+    await refresh();
+    toast('File attached.');
+  });
+};
+
+window.addDocument = async function(id, prefix){
+  prefix = prefix || 'newdoc-';
+  const nameInput = document.getElementById(prefix+'name');
+  const name = nameInput.value.trim();
+  if(!name){ toast('Document name is required.'); return; }
+  const status = document.getElementById(prefix+'status').value;
+  const fileInput = document.getElementById(prefix+'file');
+  const file = fileInput.files[0];
+  await withBusy(async ()=>{
+    const { data, error } = await window.sb.from('documents').insert({community_id:id, name, status}).select().single();
+    if(error) throw error;
+    if(file){
+      const path = `${id}/${data.id}-${Date.now()}-${safeFileName(file.name)}`;
+      const { error: upErr } = await window.sb.storage.from('documents').upload(path, file);
+      if(upErr) throw upErr;
+      await window.sb.from('documents').update({file_path: path}).eq('id', data.id);
+    }
+    await refresh();
+    toast('Document added.');
   });
 };
 
@@ -297,7 +344,11 @@ function renderDetail(id){
   const docs = (c.documents||[]).map(d=>`
     <div class="docrow">
       <div><div class="dn">${esc(d.name)}</div><div class="dnote">${esc(d.note||'')}</div></div>
-      <button class="statuspill ${d.status}" onclick="cycleDocStatus('${c.id}','${d.id}')" title="Click to change status">${d.status}</button>
+      <div class="docactions">
+        ${d.filePath ? `<button class="btn-link" onclick="viewDocumentFile('${d.filePath}')">View file</button>` : ''}
+        <label class="btn-link upload-label">${d.filePath ? 'Replace' : 'Attach file'}<input type="file" onchange="uploadDocumentFile('${c.id}','${d.id}', this)"></label>
+        <button class="statuspill ${d.status}" onclick="cycleDocStatus('${c.id}','${d.id}')" title="Click to change status">${d.status}</button>
+      </div>
     </div>`).join('') || `<div class="dnote">No documents logged yet.</div>`;
 
   const flags = (c.flags||[]).map(f=>`
@@ -350,7 +401,15 @@ function renderDetail(id){
       ${kv('Referral source', c.referralSource)}${kv('References', c.references)}
     </div>
     <div class="section"><h3>Community investment</h3>${kv('Contribution', c.communityContribution)}</div>
-    <div class="section"><h3>Documents & compliance</h3><div class="doclist">${docs}</div></div>
+    <div class="section"><h3>Documents & compliance</h3>
+      <div class="doclist">${docs}</div>
+      <div class="adddoc">
+        <input id="newdoc-name" type="text" placeholder="Document name…">
+        <select id="newdoc-status"><option value="missing">missing</option><option value="valid">valid</option><option value="expired">expired</option></select>
+        <input id="newdoc-file" type="file">
+        <button class="btn btn-outline" onclick="addDocument('${c.id}')">Add document</button>
+      </div>
+    </div>
     <div class="section">
       <h3>Open flags</h3>
       <div class="flaglist">${flags}</div>
@@ -426,6 +485,67 @@ function renderForm(id){
   </div>`;
 }
 
+/* ============================= RENDER: DOCUMENTS (all communities) ============================= */
+function renderDocumentsView(){
+  const q = state.docSearch.toLowerCase();
+  const rows = [];
+  state.communities.forEach(c=>{
+    (c.documents||[]).forEach(d=>{
+      if(!q || (c.orgName||'').toLowerCase().includes(q) || (c.acronym||'').toLowerCase().includes(q) || (d.name||'').toLowerCase().includes(q)){
+        rows.push({community:c, doc:d});
+      }
+    });
+  });
+  const counts = {valid:0, expired:0, missing:0};
+  state.communities.forEach(c=>(c.documents||[]).forEach(d=>{ counts[d.status] = (counts[d.status]||0)+1; }));
+
+  const communityOptions = state.communities.map(c=>`<option value="${c.id}">${esc(c.acronym||c.orgName)}</option>`).join('');
+
+  const rowsHtml = rows.map(({community:c, doc:d})=>`
+    <div class="docrow">
+      <div>
+        <div class="dn">${esc(d.name)}</div>
+        <div class="dnote">
+          <a href="#" onclick="openDetail('${c.id}');return false;" style="color:var(--teal);font-weight:700;text-decoration:none;">${esc(c.acronym||c.orgName)}</a>
+          ${d.note?` · ${esc(d.note)}`:''}
+        </div>
+      </div>
+      <div class="docactions">
+        ${d.filePath ? `<button class="btn-link" onclick="viewDocumentFile('${d.filePath}')">View file</button>` : ''}
+        <label class="btn-link upload-label">${d.filePath ? 'Replace' : 'Attach file'}<input type="file" onchange="uploadDocumentFile('${c.id}','${d.id}', this)"></label>
+        <button class="statuspill ${d.status}" onclick="cycleDocStatus('${c.id}','${d.id}')" title="Click to change status">${d.status}</button>
+      </div>
+    </div>`).join('') || `<div class="dnote" style="padding:20px 0;text-align:center;">No documents match.</div>`;
+
+  return `<div class="page" style="max-width:920px;">
+    <h2 style="margin-bottom:4px;">All Documents & Forms</h2>
+    <p style="color:var(--ink-soft);font-size:13.5px;margin:0 0 16px;">Every document logged across every community, in one place.</p>
+
+    <div class="toolbar" style="border:1px solid var(--line);border-radius:12px;margin-bottom:16px;background:#fff;">
+      <div class="stat"><span class="n">${rows.length}</span><span class="l">Total docs</span></div>
+      <div class="stat"><span class="n" style="color:#2c6e3a;">${counts.valid||0}</span><span class="l">Valid</span></div>
+      <div class="stat"><span class="n" style="color:var(--red);">${counts.expired||0}</span><span class="l">Expired</span></div>
+      <div class="stat"><span class="n" style="color:var(--amber);">${counts.missing||0}</span><span class="l">Missing</span></div>
+      <div class="search"><input type="text" placeholder="Search by community or document name…" value="${esc(state.docSearch)}" oninput="setDocSearch(this.value)"></div>
+    </div>
+
+    <div class="section">
+      <div class="doclist">${rowsHtml}</div>
+    </div>
+
+    <div class="section">
+      <h3>Add a document</h3>
+      <div class="adddoc">
+        <select id="gdoc-community" style="min-width:220px;">${communityOptions}</select>
+        <input type="text" id="gdoc-name" placeholder="Document name">
+        <select id="gdoc-status"><option value="valid">valid</option><option value="expired">expired</option><option value="missing" selected>missing</option></select>
+        <input type="file" id="gdoc-file">
+        <button class="btn btn-outline" onclick="addDocument(document.getElementById('gdoc-community').value, 'gdoc-')">Add document</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 /* ============================= MASTER RENDER ============================= */
 function render(){
   const root = document.getElementById('root');
@@ -436,6 +556,7 @@ function render(){
       <div class="brand"><h1>La Famille Foundation</h1><div class="sub">Community Partnership Pipeline</div></div>
       <div class="actions">
         <div class="userchip"><span class="email">${esc(state.user?.email||'')}</span></div>
+        ${state.view==='board' || state.view==='documents' ? `<button class="btn btn-outline" style="background:rgba(255,255,255,.12);color:#fff;border-color:transparent;" onclick="${state.view==='documents'?'backToBoard()':'openDocuments()'}">${state.view==='documents'?'← Pipeline board':'📄 Documents'}</button>` : ''}
         ${state.view==='board' ? `<button class="btn btn-primary" onclick="openNewForm()">+ New intake</button>` : ''}
         <div class="kebabmenu">
           <button class="icon-btn btn-ghost" onclick="toggleMenu()" style="border-radius:8px;">⋮</button>
@@ -450,6 +571,7 @@ function render(){
   if(state.view==='board') body = renderBoard();
   else if(state.view==='detail') body = renderDetail(state.activeId);
   else if(state.view==='form') body = renderForm(state.activeId);
+  else if(state.view==='documents') body = renderDocumentsView();
 
   root.innerHTML = header + errorBanner + body;
 }

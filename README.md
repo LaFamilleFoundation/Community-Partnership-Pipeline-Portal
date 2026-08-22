@@ -1,9 +1,9 @@
 # LFF Partnership Pipeline — Setup Guide (Supabase edition)
 
 This is a real, private, multi-user portal: Supabase (Postgres) holds the
-data behind Row Level Security, authentication is invite-only magic-link
-sign-in, and the whole frontend is static files — deployable straight from
-this GitHub repo with no server to run yourself.
+data behind Row Level Security, authentication is invite-only email +
+password sign-in, and the whole frontend is static files — deployable
+straight from this GitHub repo with no server to run yourself.
 
 Total hands-on time: roughly 30–40 minutes.
 
@@ -33,19 +33,22 @@ This is the step that makes the data actually private.
 1. In Supabase: **Authentication → Providers → Email**.
    - Make sure **Email** is enabled.
    - **Turn OFF "Allow new users to sign up."** This is the key step —
-     with it off, nobody can create an account except people you add
-     yourself. Magic-link sign-in only works for accounts that already
-     exist.
+     with it off, nobody can create an account except you, from the
+     dashboard. There is no sign-up form in the app itself.
 2. **Authentication → URL Configuration**:
    - Set **Site URL** to whatever URL you'll deploy to (e.g.
      `https://yourname.github.io/lff-pipeline` or your Vercel URL — you
      can update this later once you know the real URL).
-   - Add the same URL under **Redirect URLs**.
-3. **Authentication → Users → Invite user**, once for yourself and once
-   per field staffer, using their real email addresses. Each invite sends
-   them an email; the first magic-link sign-in completes their account
-   setup.
-4. Anyone not explicitly invited here will never be able to sign in, no
+   - Add the same URL under **Redirect URLs** (this is also where the
+     "forgot password" reset link sends people back to).
+3. **Authentication → Users → Add user**, once for yourself and once per
+   field staffer, using their real email addresses. Set a temporary
+   password directly (or check "Auto Confirm User" if that option is
+   shown), then share that password with them yourself — text, Signal,
+   in person, whatever channel you trust. They can change it after
+   signing in the first time using "Forgot your password?" on the
+   sign-in screen.
+4. Anyone not explicitly added here will never be able to sign in, no
    matter what they try — that's what makes this private instead of a
    public link.
 
@@ -91,15 +94,18 @@ This is the step that makes the data actually private.
 npm run dev
 ```
 Opens the app at `http://localhost:5173`. Add `http://localhost:5173` to
-Supabase's Redirect URLs (Part 2) if you want magic links to work locally
-too.
+Supabase's Redirect URLs (Part 2) if you want password-reset links to work
+locally too.
 
 ## How sign-in works day to day
 
-- You and field staff each go to the site, enter your email, and get a
-  one-time link. No passwords to manage or reset.
-- Sessions persist in the browser, so people won't need to re-request a
-  link every visit.
+- You and field staff each go to the site and sign in with email + password.
+- New accounts are created by you, from **Authentication → Users → Add
+  user** in Supabase — there's no self-service sign-up in the app.
+- Forgot a password? "Forgot your password?" on the sign-in screen emails
+  a reset link.
+- Sessions persist in the browser, so people won't need to sign in again
+  every visit.
 - "Sign out" is in the ⋮ menu next to your email in the top bar.
 
 ## What's different from the old Airtable/Claude versions

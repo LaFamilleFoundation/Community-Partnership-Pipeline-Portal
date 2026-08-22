@@ -96,12 +96,17 @@ window.signOut = async function(){
 };
 
 async function bootAuth(){
-  const { data: { session } } = await window.sb.auth.getSession();
-  authState.session = session;
-  authState.checked = true;
-
+  // Register the listener BEFORE any getSession() call. A password-reset
+  // link lands here with a recovery token in the URL that the client
+  // processes asynchronously; that processing is what fires
+  // PASSWORD_RECOVERY through this same listener. Calling getSession()
+  // first would resolve that processing (and consume the event) before
+  // we're subscribed to hear it, so the recovery session gets treated as
+  // an ordinary signed-in session and the app boots straight past the
+  // "set a new password" screen.
   window.sb.auth.onAuthStateChange((event, session) => {
     authState.session = session;
+    authState.checked = true;
     if (event === 'PASSWORD_RECOVERY') {
       renderPasswordUpdateScreen();
       return;
@@ -112,12 +117,6 @@ async function bootAuth(){
       renderAuthScreen();
     }
   });
-
-  if (authState.session) {
-    bootApp(authState.session);
-  } else {
-    renderAuthScreen();
-  }
 }
 
 // Shown after a user clicks the link from requestPasswordReset() above —
@@ -147,10 +146,9 @@ window.submitNewPassword = async function(){
     authState.message = error.message;
     authState.messageKind = 'err';
     renderPasswordUpdateScreen();
-    return;
   }
-  const { data: { session } } = await window.sb.auth.getSession();
-  if (session) bootApp(session);
+  // on success, updateUser() itself triggers onAuthStateChange with the
+  // now-permanent session, and the listener above boots the app from there
 };
 
 bootAuth();

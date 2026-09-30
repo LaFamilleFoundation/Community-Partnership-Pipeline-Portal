@@ -55,8 +55,12 @@ create table if not exists documents (
   name text not null,
   status text not null default 'missing' check (status in ('valid','expired','missing')),
   note text,
+  file_path text,   -- object path in the "documents" Storage bucket
+  file_name text,   -- original filename, used for downloads
   created_at timestamptz not null default now()
 );
+alter table documents add column if not exists file_path text;
+alter table documents add column if not exists file_name text;
 
 -- ---------- FLAGS ----------
 create table if not exists flags (
@@ -113,6 +117,16 @@ create policy "authenticated_all_communities" on communities
 drop policy if exists "authenticated_all_documents" on documents;
 create policy "authenticated_all_documents" on documents
   for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+-- Uploaded document files live in a private bucket, same signed-in-only rule.
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('documents', 'documents', false, 26214400)
+on conflict (id) do nothing;
+
+drop policy if exists "authenticated_all_documents_bucket" on storage.objects;
+create policy "authenticated_all_documents_bucket" on storage.objects
+  for all using (bucket_id = 'documents' and auth.role() = 'authenticated')
+  with check (bucket_id = 'documents' and auth.role() = 'authenticated');
 
 drop policy if exists "authenticated_all_flags" on flags;
 create policy "authenticated_all_flags" on flags

@@ -78,7 +78,7 @@ async function loadAll(){
 
   const byId = {};
   (comm||[]).forEach(r => byId[r.id] = rowToCommunity(r));
-  (docs||[]).forEach(r => { if(byId[r.community_id]) byId[r.community_id].documents.push({id:r.id, name:r.name, status:r.status, note:r.note||'', filePath:r.file_path||''}); });
+  (docs||[]).forEach(r => { if(byId[r.community_id]) byId[r.community_id].documents.push({id:r.id, name:r.name, status:r.status, note:r.note||'', filePath:r.file_path||'', fileName:r.file_name||''}); });
   (flagRows||[]).forEach(r => { if(byId[r.community_id]) byId[r.community_id].flags.push({id:r.id, text:r.flag_text}); });
   (commsRows||[]).forEach(r => { if(byId[r.community_id]) byId[r.community_id].comms.push({id:r.id, date:r.comm_date, channel:r.channel, by:r.logged_by||'', summary:r.summary}); });
   Object.values(byId).forEach(c => c.comms.sort((a,b)=> (b.date||'').localeCompare(a.date||'')));
@@ -153,27 +153,73 @@ window.cycleDocStatus = async function(id, docId){
 };
 
 function safeFileName(name){ return name.replace(/[^a-zA-Z0-9_.-]/g, '_'); }
+function findDocument(id, docId){ return (findCommunity(id)?.documents||[]).find(d=>d.id===docId); }
 
-window.viewDocumentFile = async function(filePath){
-  if(!filePath) return;
-  const { data, error } = await window.sb.storage.from('documents').createSignedUrl(filePath, 60);
-  if(error){ toast('Could not open file — ' + error.message); return; }
-  window.open(data.signedUrl, '_blank');
+// Uploads a file for a document row and records where it went. If saving the
+// path fails, the uploaded object is removed so it can't be left orphaned.
+async function attachFileToDocument(id, docId, file){
+  const bucket = window.sb.storage.from('documents');
+  const path = `${id}/${docId}-${Date.now()}-${safeFileName(file.name)}`;
+  const { error: upErr } = await bucket.upload(path, file);
+  if(upErr) throw upErr;
+  const { error } = await window.sb.from('documents').update({file_path: path, file_name: file.name}).eq('id', docId);
+  if(error){
+    await bucket.remove([path]);
+    throw error;
+  }
+  return path;
+}
+
+// Signed URLs expire quickly; a download link tells Storage to send the file
+// as an attachment under its original name.
+async function signedDocumentUrl(doc, download){
+  const opts = download ? {download: doc.fileName || doc.filePath.split('/').pop()} : undefined;
+  const { data, error } = await window.sb.storage.from('documents').createSignedUrl(doc.filePath, 300, opts);
+  if(error) throw error;
+  return data.signedUrl;
+}
+
+window.viewDocumentFile = async function(id, docId){
+  const doc = findDocument(id, docId);
+  if(!doc?.filePath) return;
+  // Open the tab synchronously so Safari/Firefox don't treat it as a popup.
+  const win = window.open('', '_blank');
+  try{
+    const url = await signedDocumentUrl(doc, false);
+    if(win) win.location.href = url; else window.location.href = url;
+  }catch(e){
+    if(win) win.close();
+    toast('Could not open file — ' + (e.message||'try again.'));
+  }
+};
+
+window.downloadDocumentFile = async function(id, docId){
+  const doc = findDocument(id, docId);
+  if(!doc?.filePath) return;
+  try{
+    window.location.href = await signedDocumentUrl(doc, true);
+  }catch(e){
+    toast('Could not download file — ' + (e.message||'try again.'));
+  }
 };
 
 window.uploadDocumentFile = async function(id, docId, inputEl){
   const file = inputEl.files[0];
   if(!file) return;
   await withBusy(async ()=>{
-    const path = `${id}/${docId}-${Date.now()}-${safeFileName(file.name)}`;
-    const { error: upErr } = await window.sb.storage.from('documents').upload(path, file);
-    if(upErr) throw upErr;
-    const { error } = await window.sb.from('documents').update({file_path: path}).eq('id', docId);
-    if(error) throw error;
+    const oldPath = findDocument(id, docId)?.filePath;
+    await attachFileToDocument(id, docId, file);
+    if(oldPath) await window.sb.storage.from('documents').remove([oldPath]);
     await refresh();
     toast('File attached.');
   });
 };
+
+function documentFileActions(c, d){
+  return `${d.filePath ? `<button class="btn-link" onclick="viewDocumentFile('${c.id}','${d.id}')" title="${esc(d.fileName)}">View</button>
+        <button class="btn-link" onclick="downloadDocumentFile('${c.id}','${d.id}')">Download</button>` : `<span class="nofile">No file</span>`}
+        <label class="btn-link upload-label">${d.filePath ? 'Replace' : 'Attach file'}<input type="file" onchange="uploadDocumentFile('${c.id}','${d.id}', this)"></label>`;
+}
 
 window.addDocument = async function(id, prefix){
   prefix = prefix || 'newdoc-';
@@ -187,13 +233,14 @@ window.addDocument = async function(id, prefix){
     const { data, error } = await window.sb.from('documents').insert({community_id:id, name, status}).select().single();
     if(error) throw error;
     if(file){
-      const path = `${id}/${data.id}-${Date.now()}-${safeFileName(file.name)}`;
-      const { error: upErr } = await window.sb.storage.from('documents').upload(path, file);
-      if(upErr) throw upErr;
-      await window.sb.from('documents').update({file_path: path}).eq('id', data.id);
+      try{ await attachFileToDocument(id, data.id, file); }
+      catch(e){
+        await refresh();
+        throw new Error(`document saved, but the file didn't attach (${e.message}). Use "Attach file" on that row to retry.`);
+      }
     }
     await refresh();
-    toast('Document added.');
+    toast(file ? 'Document and file added.' : 'Document added.');
   });
 };
 
@@ -345,8 +392,7 @@ function renderDetail(id){
     <div class="docrow">
       <div><div class="dn">${esc(d.name)}</div><div class="dnote">${esc(d.note||'')}</div></div>
       <div class="docactions">
-        ${d.filePath ? `<button class="btn-link" onclick="viewDocumentFile('${d.filePath}')">View file</button>` : ''}
-        <label class="btn-link upload-label">${d.filePath ? 'Replace' : 'Attach file'}<input type="file" onchange="uploadDocumentFile('${c.id}','${d.id}', this)"></label>
+        ${documentFileActions(c, d)}
         <button class="statuspill ${d.status}" onclick="cycleDocStatus('${c.id}','${d.id}')" title="Click to change status">${d.status}</button>
       </div>
     </div>`).join('') || `<div class="dnote">No documents logged yet.</div>`;
@@ -511,8 +557,7 @@ function renderDocumentsView(){
         </div>
       </div>
       <div class="docactions">
-        ${d.filePath ? `<button class="btn-link" onclick="viewDocumentFile('${d.filePath}')">View file</button>` : ''}
-        <label class="btn-link upload-label">${d.filePath ? 'Replace' : 'Attach file'}<input type="file" onchange="uploadDocumentFile('${c.id}','${d.id}', this)"></label>
+        ${documentFileActions(c, d)}
         <button class="statuspill ${d.status}" onclick="cycleDocStatus('${c.id}','${d.id}')" title="Click to change status">${d.status}</button>
       </div>
     </div>`).join('') || `<div class="dnote" style="padding:20px 0;text-align:center;">No documents match.</div>`;
